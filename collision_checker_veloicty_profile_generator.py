@@ -181,7 +181,9 @@ class CollisionChecker:
 class VelocityProfile:
 	def __init__(self):
 		pass
-		
+	
+	# Generated the velocity profile for a single path given initial
+	# velocity of ego vehicle
 	def single_velocity_profile(self, path, initial_velocity):
 		l = len(path)
 		v = deltav = theta = [0.0]*l
@@ -262,20 +264,59 @@ class VelocityProfile:
 		#waypoints = waypoints[0:-1]
 		return waypoints[:][2]
 
+	# generates velocity profile for all paths passed and returns the path along
+	# with the velocity profile
 	def generate_velocity_profile(self, paths, ego_state):
+		"""Returns paths along with velocity profile
+
+		args:
+				paths: A list of paths in the global frame.  
+					A path is a list of points of the following format:
+						[x_points, y_points, t_points]:
+							x_points: List of x values (m)
+							y_points: List of y values (m)
+							t_points: List of yaw values (rad)
+						Example of accessing the ith path, jth point's t value:
+							paths[i][2][j]
+				ego_state: ego state vector for the vehicle. (global frame)
+					format: [ego_x, ego_y, ego_yaw, ego_speed]
+						ego_x and ego_y     : position (m)
+						ego_yaw             : top-down orientation [-pi to pi] (ground frame)
+						ego_speed : speed (m/s)
+			returns:
+				vel_paths: A list of all paths + their veloicty profile
+					Is of the format:
+						[x_points, y_points, t_points, v_points]
+							x_points: List of x values (m)
+							y_points: List of y values (m)
+							t_points: List of yaw values (rad)
+							v_points: List of all the velocities from profile (m/s)
+
+		"""
 		
+		# initializing vel_paths
 		vel_paths = np.zeros((len(paths), 4, len(paths[0][0])), dtype = float)
 
+		# loop over all paths
 		for i in range(len(paths)):
 			path = paths[i]
+
+			# generate velocity profile for each path
 			vel_profile = self.single_velocity_profile(np.dstack((path[0], path[1]))[0], ego_state[3])
 
+			# add profile along with path onto vel_paths
 			vel_paths[i, :3, :] = path
 			vel_paths[i, -1, 0] = ego_state[3]
 			vel_paths[i, -1, 1:-1] = vel_profile
 			vel_paths[i, -1, -1] = vel_profile[-1]
 
 		return vel_paths
+
+
+
+
+
+
 
 # TestBench
 
