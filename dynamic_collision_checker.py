@@ -17,7 +17,7 @@ class dynamic_collision_check:
         y0 = other_vech_position[1]
         other_vech_waypoints = np.zeros((len(self.path[0][0]),2))
         dt = look_ahead_time_of_planner/len(self.path[0][0])
-        for i in range(1,len(self.path[0][0])):
+        for i in range(1,len(self.path[0][0]+1)):
             other_vech_waypoints[i-1][0] = x0 + self.other_vechile_velx*i*dt
             other_vech_waypoints[i-1][1] = y0 + self.other_vechile_vely*i*dt
 
