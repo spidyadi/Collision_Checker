@@ -1,187 +1,14 @@
 import numpy as np
 import scipy.spatial
 from math import sin, cos, pi, sqrt
+import matplotlib.pyplot as plt
 
-class CollisionChecker:
+class CollisionCheckerVelocityGenerator:
 	def __init__(self, circle_offset, circle_radii, growth_factor):
 		self._circle_offset = circle_offset
 		self._circle_radii   = circle_radii
 		self._growth_factor	 = growth_factor
 
-	# Takes in a set of obstacle borders and path waypoints and returns
-	# a boolean collision check array that tells if a path has an obstacle
-	# or not
-	def static_collision_check(self, paths, obstacles):
-		"""Returns a bool array on whether each path is collision free.
-
-		args:
-			paths: A list of paths in the global frame.  
-				A path is a list of points of the following format:
-					[x_points, y_points, t_points]:
-						x_points: List of x values (m)
-						y_points: List of y values (m)
-						t_points: List of yaw values (rad)
-					Example of accessing the ith path, jth point's t value:
-						paths[i][2][j]
-			obstacles: A list of [x, y] points that represent points along the
-				border of obstacles, in the global frame.
-				Format: [[x0, y0],
-						 [x1, y1],
-						 ...,
-						 [xn, yn]]
-				, where n is the number of obstacle points and units are [m, m]
-
-		returns:
-			collision_check_array: A list of boolean values which classifies
-				whether the path is collision-free (true), or not (false). The
-				ith index in the collision_check_array list corresponds to the
-				ith path in the paths list.
-		"""
-		collision_check_array = np.zeros(len(paths), dtype=bool)
-		for i in range(len(paths)):
-			collision_free = True
-			path           = paths[i]
-
-			# Iterate over the points in the path.
-			for j in range(len(path[0])):
-				
-				circle_locations = np.zeros((1, 2))
-
-				circle_locations[0, 0] = path[0][j] + self._circle_offset*cos(path[2][j])
-				circle_locations[0, 1] = path[1][j] + self._circle_offset*sin(path[2][j])
-				
-				for k in range(len(obstacles)):
-					collision_dists = scipy.spatial.distance.cdist(np.array([obstacles[k]]), circle_locations)
-					collision_dists = np.subtract(collision_dists, self._circle_radii)
-					collision_free = collision_free and not np.any(collision_dists < 0)
-
-					if not collision_free:
-						break
-				if not collision_free:
-					break
-
-			collision_check_array[i] = collision_free
-
-		return collision_check_array
-
-	# Takes in a set of paths and obstacles, and returns an array
-	# of bools that says whether or not each path is collision free.
-	def dynamic_collision_check(self, paths, ego_state, other_vehicle_states, look_ahead_time):
-		""" Returns a bool array on whether each path is collision free.
-		
-		args:
-				paths: A list of paths in the global frame.  
-					A path is a list of points of the following format:
-						[x_points, y_points, t_points]:
-							x_points: List of x values (m)
-							y_points: List of y values (m)
-							t_points: List of yaw values (rad)
-						Example of accessing the ith path, jth point's t value:
-							paths[i][2][j]
-				ego_state: ego state vector for the vehicle. (global frame)
-					format: [ego_x, ego_y, ego_yaw, ego_speed]
-						ego_x and ego_y     : position (m)
-						ego_yaw             : top-down orientation [-pi to pi] (ground frame)
-						ego_speed : speed (m/s)
-				other_vehicle_states: other vehicles' state vectors
-					Each state vector is of the format (global frame):
-						[pos_x, pos_y, yaw, speed]
-							pos_x and pos_y	: position (m)
-							yaw 			: top-down orientation [-pi to pi] (ground frame)
-							speed 			: speed (m/s)
-						Example of accessing the ith car's speed would be:
-							other_vehicle_states[i][3]
-				look_ahead_time: The look ahead time to which the paths have been generated (s)
-
-			returns:
-				collision_check_array: A list of boolean values which classifies
-					whether the path is collision-free (true), or not (false). The
-					ith index in the collision_check_array list corresponds to the
-					ith path in the paths list.
-		"""
-
-		# timesetop between each point in path
-		time_step = look_ahead_time/(len(paths[0][0]) - 1)
-
-		# generate the other vehicles' paths assuming same yaw and same velocity over the look ahead time
-		other_vehicle_paths = np.zeros((len(other_vehicle_states), 3, len(paths[0][0])), dtype=float)
-
-		for i in range(len(other_vehicle_paths)):
-			vehicle_state = other_vehicle_states[i]
-			vehicle_path = np.zeros((3, len(paths[0][0])), dtype = float)
-
-			vehicle_path[0] = vehicle_state[0] + time_step*vehicle_state[3]*cos(vehicle_state[2])*range(1, len(paths[0][0])+1, 1)
-			vehicle_path[1] = vehicle_state[1] + time_step*vehicle_state[3]*sin(vehicle_state[2])*range(1, len(paths[0][0])+1, 1)
-			vehicle_path[2] = vehicle_state[2]
-
-			other_vehicle_paths[i] = vehicle_path
-
-		# checking for any collisions
-		collision_check_array = np.zeros(len(paths), dtype=bool)
-		for i in range(len(paths)):
-			collision_free = True
-			path           = paths[i]
-
-			for j in range(len(path[0])):
-
-				# generating ego vehicle's circle location from the given offset
-				ego_circle_locations = np.zeros((1, 2))
-				
-				ego_circle_locations[:, 0] = path[0][j] + self._circle_offset*cos(path[2][j])
-				ego_circle_locations[:, 1] = path[1][j] + self._circle_offset*sin(path[2][j])
-
-				for k in range(len(other_vehicle_states)):
-					# generating other vehicles' circle locations based on circle offset
-					other_circle_locations = np.zeros((1,2))
-
-					other_circle_locations[:, 0] = other_vehicle_paths[k][0][j] + self._circle_offset*cos(other_vehicle_paths[k][2][j])
-					other_circle_locations[:, 1] = other_vehicle_paths[k][1][j] + self._circle_offset*sin(other_vehicle_paths[k][2][j])
-
-					# calculating if any collisions occour
-					collision_dists = scipy.spatial.distance.cdist(other_circle_locations, ego_circle_locations)
-					collision_dists = np.subtract(collision_dists, self._circle_radii*(2 + self._growth_factor*time_step*(j+1)))
-					collision_free = collision_free and not np.any(collision_dists < 0)
-
-					if not collision_free:
-						break
-				if not collision_free:
-					break
-
-			# updating collision_check_array based on the bool collision_free
-			collision_check_array[i] = collision_free
-
-		return collision_check_array
-
-
-	# implements both static and dynamic under one function for ease of operation
-	def check_collisions(self, paths, obstacles, ego_state, other_vehicle_states, look_ahead_time):
-
-		static_collision_check_array = np.array(self.static_collision_check(paths, obstacles))
-		new_paths = paths[np.where(static_collision_check_array == True)[0]]
-		new_paths_index = np.where(static_collision_check_array == True)[0]
-
-		if True not in static_collision_check_array:
-			viable_paths = None
-			return viable_paths
-
-		dynamic_collision_check_array = np.array(self.dynamic_collision_check(new_paths, ego_state, other_vehicle_states, look_ahead_time))
-
-		static_collision_check_array[new_paths_index[np.where(dynamic_collision_check_array == False)[0]]] = False
-		collision_check_array = static_collision_check_array
-
-		if True in collision_check_array:
-			viable_paths = paths[collision_check_array]
-		else:
-			viable_paths = None
-
-		return viable_paths
-
-
-
-class VelocityProfile:
-	def __init__(self):
-		pass
-	
 	# Generated the velocity profile for a single path given initial
 	# velocity of ego vehicle
 	def single_velocity_profile(self, path, initial_velocity):
@@ -262,7 +89,7 @@ class VelocityProfile:
 			waypoints[xx][1] = y[xx]
 			waypoints[xx][2] = v[xx]
 		#waypoints = waypoints[0:-1]
-		return waypoints[:][2]
+		return v
 
 	# generates velocity profile for all paths passed and returns the path along
 	# with the velocity profile
@@ -306,11 +133,243 @@ class VelocityProfile:
 
 			# add profile along with path onto vel_paths
 			vel_paths[i, :3, :] = path
-			vel_paths[i, -1, 0] = ego_state[3]
-			vel_paths[i, -1, 1:-1] = vel_profile
-			vel_paths[i, -1, -1] = vel_profile[-1]
+			vel_paths[i, -1] = vel_profile
+			# vel_paths[i, -1, 0] = ego_state[3]
+			# vel_paths[i, -1, 1:-1] = vel_profile
+			# vel_paths[i, -1, -1] = 2*vel_profile[-1] - vel_profile[-2]
 
-		return vel_paths
+		return vel_paths[:, :, :-1]
+
+
+
+	# Takes in a set of obstacle borders and path waypoints and returns
+	# a boolean collision check array that tells if a path has an obstacle
+	# or not
+	def static_collision_check(self, paths, obstacles):
+		"""Returns a bool array on whether each path is collision free.
+
+		args:
+			paths: A list of paths in the global frame.  
+				A path is a list of points of the following format:
+					[x_points, y_points, t_points]:
+						x_points: List of x values (m)
+						y_points: List of y values (m)
+						t_points: List of yaw values (rad)
+					Example of accessing the ith path, jth point's t value:
+						paths[i][2][j]
+			obstacles: A list of [x, y] points that represent points along the
+				border of obstacles, in the global frame.
+				Format: [[x0, y0],
+						 [x1, y1],
+						 ...,
+						 [xn, yn]]
+				, where n is the number of obstacle points and units are [m, m]
+
+		returns:
+			collision_check_array: A list of boolean values which classifies
+				whether the path is collision-free (true), or not (false). The
+				ith index in the collision_check_array list corresponds to the
+				ith path in the paths list.
+		"""
+		collision_check_array = np.zeros(len(paths), dtype=bool)
+		for i in range(len(paths)):
+			collision_free = True
+			path           = paths[i]
+
+			# Iterate over the points in the path.
+			for j in range(len(path[0])):
+				
+				circle_locations = np.zeros((1, 2))
+
+				circle_locations[0, 0] = path[0][j] + self._circle_offset*cos(path[2][j])
+				circle_locations[0, 1] = path[1][j] + self._circle_offset*sin(path[2][j])
+				
+				for k in range(len(obstacles)):
+					collision_dists = scipy.spatial.distance.cdist(np.array([obstacles[k]]), circle_locations)
+					collision_dists = np.subtract(collision_dists, self._circle_radii)
+					collision_free = collision_free and not np.any(collision_dists < 0)
+
+					if not collision_free:
+						break
+				if not collision_free:
+					break
+
+			collision_check_array[i] = collision_free
+
+		return collision_check_array
+
+	# generate time steps for single path
+	def single_time_step(self, path, velocity_profile):
+
+		look_ahead_time = 0
+
+		time_step = np.zeros((len(velocity_profile),), dtype = float)
+
+		for i in range(len(velocity_profile) - 1):
+			s = np.sqrt((path[0][i+1] - path[0][i])**2 + (path[1][i+1] - path[1][i])**2)
+			time_step[i+1] = (2*s)/(velocity_profile[i+1] + velocity_profile[i])
+
+		return time_step
+
+	# generate time steps for all paths
+	def generate_time_steps(self, paths, ego_state):
+
+		self.vel_paths = self.generate_velocity_profile(paths, ego_state)
+		time_step = np.zeros((len(paths), len(paths[0][0])-1), dtype=float)
+
+		for i in range(len(self.vel_paths)):
+			path = self.vel_paths[i][:3]
+			vel_profile = self.vel_paths[i][-1]
+
+			time_step[i] = self.single_time_step(path, vel_profile)
+
+		return time_step
+
+
+	def generate_other_vehicle_paths(self, time_step, other_vehicle_states):
+
+		other_vehicle_paths = np.zeros((len(other_vehicle_states), 3, len(time_step)), dtype=float)
+
+		for i in range(len(other_vehicle_paths)):
+			vehicle_state = other_vehicle_states[i]
+			vehicle_path = np.zeros((3, len(time_step)), dtype = float)
+
+			vehicle_path[0][0] = vehicle_state[0]
+			vehicle_path[1][0] = vehicle_state[1]
+			vehicle_path[2][0] = vehicle_state[2]
+
+			for j in range(1, len(time_step)):
+				vehicle_path[0][j] = vehicle_path[0][j-1] + time_step[j]*vehicle_state[3]*cos(vehicle_state[2])
+				vehicle_path[1][j] = vehicle_path[1][j-1] + time_step[j]*vehicle_state[3]*sin(vehicle_state[2])
+				vehicle_path[2][j] = vehicle_state[2]
+
+			other_vehicle_paths[i] = vehicle_path
+
+		return other_vehicle_paths
+
+	# Takes in a set of paths and obstacles, and returns an array
+	# of bools that says whether or not each path is collision free.
+	def dynamic_collision_check(self, paths, ego_state, other_vehicle_states):
+		""" Returns a bool array on whether each path is collision free.
+		
+		args:
+				paths: A list of paths in the global frame.  
+					A path is a list of points of the following format:
+						[x_points, y_points, t_points]:
+							x_points: List of x values (m)
+							y_points: List of y values (m)
+							t_points: List of yaw values (rad)
+						Example of accessing the ith path, jth point's t value:
+							paths[i][2][j]
+				ego_state: ego state vector for the vehicle. (global frame)
+					format: [ego_x, ego_y, ego_yaw, ego_speed]
+						ego_x and ego_y     : position (m)
+						ego_yaw             : top-down orientation [-pi to pi] (ground frame)
+						ego_speed : speed (m/s)
+				other_vehicle_states: other vehicles' state vectors
+					Each state vector is of the format (global frame):
+						[pos_x, pos_y, yaw, speed]
+							pos_x and pos_y	: position (m)
+							yaw 			: top-down orientation [-pi to pi] (ground frame)
+							speed 			: speed (m/s)
+						Example of accessing the ith car's speed would be:
+							other_vehicle_states[i][3]
+
+			returns:
+				collision_check_array: A list of boolean values which classifies
+					whether the path is collision-free (true), or not (false). The
+					ith index in the collision_check_array list corresponds to the
+					ith path in the paths list.
+		"""
+
+		# time step between each point in the paths
+		time_step = self.generate_time_steps(paths, ego_state)
+
+		# checking for any collisions
+		collision_check_array = np.zeros(len(paths), dtype=bool)
+		for i in range(len(paths)):
+			collision_free = True
+			path           = paths[i]
+			other_vehicle_paths = self.generate_other_vehicle_paths(time_step[i], other_vehicle_states)
+
+			for j in range(len(path[0]) - 1):
+
+				# generating ego vehicle's circle location from the given offset
+				ego_circle_locations = np.zeros((1, 2))
+				
+				ego_circle_locations[:, 0] = path[0][j] + self._circle_offset*cos(path[2][j])
+				ego_circle_locations[:, 1] = path[1][j] + self._circle_offset*sin(path[2][j])
+
+				for k in range(len(other_vehicle_states)):
+					# generating other vehicles' circle locations based on circle offset
+					other_circle_locations = np.zeros((1,2))
+
+					other_circle_locations[:, 0] = other_vehicle_paths[k][0][j] + self._circle_offset*cos(other_vehicle_paths[k][2][j])
+					other_circle_locations[:, 1] = other_vehicle_paths[k][1][j] + self._circle_offset*sin(other_vehicle_paths[k][2][j])
+
+					# calculating if any collisions occour
+					collision_dists = scipy.spatial.distance.cdist(other_circle_locations, ego_circle_locations)
+					collision_dists = np.subtract(collision_dists, self._circle_radii*(2 + self._growth_factor*np.sum(time_step[0][:j])))
+					collision_free = collision_free and not np.any(collision_dists < 0)
+
+					if not collision_free:
+						break
+				if not collision_free:
+					break
+
+			# updating collision_check_array based on the bool collision_free
+			collision_check_array[i] = collision_free
+
+			# fig, ax = plt.subplots()
+			# ax.plot(other_vehicle_paths[0][0], other_vehicle_paths[0][1], 'ro')
+			# for m in range(len(other_vehicle_paths[0][0])):
+			# 	circle = plt.Circle((other_vehicle_paths[0][0][m], other_vehicle_paths[0][1][m]), self._circle_radii, color='r', fill=False)
+			# 	ax.add_artist(circle)
+			# ax.plot(path[0], path[1],'bo')
+			# for m in range(len(path[0])):
+			# 	circle = plt.Circle((path[0][m], path[1][m]), self._circle_radii, color='b', fill=False)
+			# 	ax.add_artist(circle)
+			# plt.show()
+		
+		return collision_check_array
+
+
+	# implements both static and dynamic under one function for ease of operation
+	def check_collisions(self, paths, obstacles, ego_state, other_vehicle_states):
+
+		static_collision_check_array = np.array(self.static_collision_check(paths, obstacles))
+		new_paths = paths[np.where(static_collision_check_array == True)[0]]
+		new_paths_index = np.where(static_collision_check_array == True)[0]
+
+		if True not in static_collision_check_array:
+			viable_paths = None
+			return viable_paths
+
+		dynamic_collision_check_array = np.array(self.dynamic_collision_check(new_paths, ego_state, other_vehicle_states))
+
+		static_collision_check_array[new_paths_index[np.where(dynamic_collision_check_array == False)[0]]] = False
+		collision_check_array = static_collision_check_array
+
+		if True in collision_check_array:
+			viable_paths = self.vel_paths[collision_check_array]
+		else:
+			viable_paths = None
+
+		return viable_paths
+
+	# checks for collisions while following the desired path incase of any sudden changes in
+	# other vehicles' states.
+	def RT_collision_check(self, path, ego_state, other_vehicle_states, look_ahead_points):
+
+		closest_point_index = np.argmin(np.sum((np.dstack((path[0], path[1]))[0] - ego_state[:2])**2, axis = 1))
+		new_path = path[closest_point_index : closest_point_index + look_ahead_points]
+
+		dynamic_collision_check_array = np.array(self.dynamic_collision_check(np.array([new_path]), ego_state, other_vehicle_states))
+
+		if False in dynamic_collision_check_array:
+			return False
+		else:
+			return True
 
 
 
@@ -320,7 +379,7 @@ class VelocityProfile:
 
 # TestBench
 
-collision_checker = CollisionChecker(0, 1, 0)
+collision_checker = CollisionCheckerVelocityGenerator(0, 0.7, 0)
 
 paths = np.zeros((2,3,5))
 paths[0] = np.array([[0, 1/4, 2/4, 3/4, 1], [1, 1, 1, 1, 1], [0, 0, 0, 0, 0]])
@@ -331,20 +390,10 @@ look_ahead_time = 1
 ego_state = np.array([0,1,0,1])
 
 other_vehicle_states = np.zeros((1, 4))
-other_vehicle_states[0] = np.array([0,-1.5,np.pi/4,1])
+other_vehicle_states[0] = np.array([0,-1,np.pi/4,10])
 
 obstacles = np.array([[3/4,-4]])
 
-viable_paths = collision_checker.check_collisions(paths, obstacles, ego_state, other_vehicle_states, look_ahead_time)
+viable_paths = collision_checker.check_collisions(paths, obstacles, ego_state, other_vehicle_states)
 
-# print(viable_paths)
-
-velocity_gen = VelocityProfile()
-
-vel_paths = velocity_gen.generate_velocity_profile(viable_paths, ego_state)
-print(vel_paths)
-
-
-
-
-		
+print(viable_paths)
